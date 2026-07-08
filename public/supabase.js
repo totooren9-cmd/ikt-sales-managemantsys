@@ -722,7 +722,7 @@ const TABLE_COLUMNS = {
   sales_orders: [
     'id', 'so_no', 'quotation_id', 'customer_id', 'project_name', 'total_amount',
     'status', 'order_date', 'target_delivery_date', 'job_no', 'po_no', 'items',
-    'created_at', 'created_by', 'updated_by'
+    'sales_person', 'created_at', 'created_by', 'updated_by'
   ],
   invoices: [
     'id', 'invoice_no', 'customer_id', 'quotation_no', 'po_reference',
@@ -1533,6 +1533,7 @@ const SupabaseDB = {
       target_delivery_date: soData.target_delivery_date || soData.delivery_plan || null,
       job_no: soData.job_no || null,
       po_no: soData.po_no || null,
+      sales_person: soData.sales_person || soData.sales_representative || null,
       items: soData.items || [],
       created_at: new Date().toISOString()
     };
@@ -1683,13 +1684,14 @@ const SupabaseDB = {
   },
 
   async addInvoice(invData) {
+    clearSupabaseCaches();
     const invoices = JSON.parse(localStorage.getItem('crm_invoices')) || [];
     
     // Auto Generate Code based on invoice_date
     const iDate = invData.invoice_date || new Date().toISOString().slice(0, 10);
     const yr = iDate.split('-')[0].slice(-2); // e.g. "26"
 
-    const thisYearInvs = invoices.filter(inv => inv.invoice_no.startsWith(`INV-${yr}`));
+    const thisYearInvs = invoices.filter(inv => inv.invoice_no && inv.invoice_no.startsWith(`INV-${yr}`));
 
     let seq = 1;
     if (thisYearInvs.length > 0) {
@@ -1704,10 +1706,11 @@ const SupabaseDB = {
     const newId = crypto.randomUUID();
 
     const currentUser = this.getCurrentUser();
+    const finalInvoiceNo = invData.invoice_no || nextCode;
     const newInv = {
       ...invData,
       id: newId,
-      invoice_no: nextCode,
+      invoice_no: finalInvoiceNo,
       total_value: parseFloat(invData.total_value) || 0,
       tax_rate: parseFloat(invData.tax_rate) || 7,
       grand_total: parseFloat(invData.grand_total) || 0,

@@ -1414,6 +1414,7 @@ export default function App() {
                                             total_amount: q.grand_total,
                                             status: 'Pending' as const,
                                             order_date: new Date().toISOString().slice(0, 10),
+                                            sales_person: q.sales_person || q.sales_representative || null,
                                             items: mappedItems
                                           };
 

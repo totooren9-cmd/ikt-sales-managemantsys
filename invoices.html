@@ -833,12 +833,12 @@
 
       const filtered = currentInvoices.filter(i => {
         const matchesSearch = !search || 
-          i.invoice_no.toLowerCase().includes(search) || 
+          (i.invoice_no && i.invoice_no.toLowerCase().includes(search)) || 
           (i.ikm_inv && i.ikm_inv.toLowerCase().includes(search)) ||
           (i.job_no && i.job_no.toLowerCase().includes(search)) ||
           (i.quotation_no && i.quotation_no.toLowerCase().includes(search)) ||
-          i.project_name.toLowerCase().includes(search) ||
-          (i.customer && i.customer.customer_name.toLowerCase().includes(search));
+          (i.project_name && i.project_name.toLowerCase().includes(search)) ||
+          (i.customer && i.customer.customer_name && i.customer.customer_name.toLowerCase().includes(search));
 
         const matchesCustomer = !customerVal || i.customer_id === customerVal;
         const matchesStatus = statusVal === 'ALL' || i.status === statusVal;
