@@ -87,14 +87,6 @@ export default function QuotationManagement() {
     const q = quotations.find((quote) => quote.id === id);
     if (!q) return;
 
-    if (
-      !confirm(
-        `คุณมั่นใจหรือไม่ที่จะทำสำเนาใบเสนอราคา ${q.quotation_no} เป็นฉบับร่างใหม่?`,
-      )
-    ) {
-      return;
-    }
-
     const payload = {
       title: q.title,
       customer_id: q.customer_id,
@@ -116,7 +108,7 @@ export default function QuotationManagement() {
     if (window.SupabaseDB) {
       // @ts-ignore
       await window.SupabaseDB.addQuotation(payload);
-      alert(`คัดลอกใบเสนอราคาสำเร็จ (ฉบับร่าง)`);
+      showToast(`คัดลอกใบเสนอราคา ${q.quotation_no} สำเร็จ (เป็นฉบับร่าง)`, 'success');
       loadData();
     }
   };
@@ -125,19 +117,15 @@ export default function QuotationManagement() {
     const q = quotations.find((quote) => quote.id === id);
     if (!q) return;
 
-    if (!confirm(`คุณต้องการลบใบเสนอราคา ${q.quotation_no} ใช่หรือไม่?`)) {
-      return;
-    }
-
     // @ts-ignore
     if (window.SupabaseDB) {
       try {
         // @ts-ignore
         await window.SupabaseDB.deleteQuotation(id);
-        alert(`ลบใบเสนอราคา ${q.quotation_no} สำเร็จ`);
+        showToast(`ลบใบเสนอราคา ${q.quotation_no} สำเร็จ`, 'success');
         loadData();
       } catch (err: any) {
-        alert(`เกิดข้อผิดพลาด: ${err.message}`);
+        showToast(`เกิดข้อผิดพลาด: ${err.message}`, 'err');
       }
     }
   };
@@ -272,7 +260,7 @@ export default function QuotationManagement() {
                   </span>
                 </div>
                 <div className="h-[140px] flex items-center justify-center">
-                  <ResponsiveContainer width="100%" height="100%" minHeight={1} minWidth={1}>
+                  <ResponsiveContainer width="100%" height={140}>
                     <PieChart>
                       <Pie
                         data={statusData}
@@ -324,6 +312,7 @@ export default function QuotationManagement() {
               onDuplicate={handleDuplicate}
               onDelete={handleDelete}
               onRefresh={loadData}
+              showToast={showToast}
             />
           </div>
         )}
@@ -371,6 +360,7 @@ function QuoteList({
   onDuplicate,
   onDelete,
   onRefresh,
+  showToast,
 }: any) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -536,13 +526,63 @@ function QuoteList({
                     </button>
                     {q.status === "Approved" || q.status === "Accepted" ? (
                       <button
-                        onClick={() =>
-                          alert(
-                            `Converting Quotation ${q.quotation_no} to Sales Order...`,
-                          )
-                        }
-                        className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-slate-100 rounded"
-                        title="Convert to Sales Order"
+                        onClick={async () => {
+                          try {
+                            showToast(`กำลังส่งใบเสนอราคา ${q.quotation_no} ไปสร้างเป็น Sales Order...`, 'success');
+                            // @ts-ignore
+                            if (window.SupabaseDB) {
+                              // Map quotation items to sales order items with rich fields for maximum compatibility
+                              const soItems = (q.items || []).map((it: any, idx: number) => {
+                                const qty = Number(it.qty || 1);
+                                const duration = Number(it.duration || 1);
+                                const unitRate = Number(it.unit_rate || it.rate || it.unit_price || 0);
+                                const totalPrice = Number(it.total_price || (qty * duration * unitRate));
+                                return {
+                                  item_no: it.item_no || idx + 1,
+                                  description: it.description || it.desc || "",
+                                  qty: qty,
+                                  remaining_qty: qty,
+                                  duration: duration,
+                                  unit: it.unit || "Set",
+                                  unit_rate: unitRate,
+                                  unit_price: unitRate,
+                                  total_price: totalPrice
+                                };
+                              });
+
+                              const soPayload = {
+                                quotation_id: q.id,
+                                customer_id: q.customer_id,
+                                project_name: q.title || q.project_name || "ดีลจากใบเสนอราคา " + q.quotation_no,
+                                total_amount: q.grand_total || q.total_value || 0,
+                                status: "Pending",
+                                order_date: new Date().toISOString().slice(0, 10),
+                                items: soItems
+                              };
+
+                              // 1. Create Sales Order
+                              // @ts-ignore
+                              const createdSo = await window.SupabaseDB.addSalesOrder(soPayload);
+                              
+                              // 2. Update Quotation status to 'Invoiced' (จบกระบวนการใบเสนอราคา)
+                              // @ts-ignore
+                              await window.SupabaseDB.updateQuotation(q.id, { status: 'Invoiced' });
+                              
+                              showToast(`ส่งไปสร้าง Sales Order สำเร็จ! ได้เลขที่สั่งขาย: ${createdSo.so_no || ''}`, 'success');
+                              
+                              // 3. Redirect to Sales Orders page
+                              setTimeout(() => {
+                                window.location.href = "/sales-orders.html";
+                              }, 1200);
+                            } else {
+                              showToast("ไม่พบตัวเชื่อมโยงระบบฐานข้อมูล", 'err');
+                            }
+                          } catch (err: any) {
+                            showToast("เกิดข้อผิดพลาดในการแปลงเอกสาร: " + err.message, 'err');
+                          }
+                        }}
+                        className="p-1.5 text-emerald-600 hover:text-white hover:bg-emerald-600 rounded border border-emerald-200 transition-colors cursor-pointer"
+                        title="ส่งไป Sales Orders"
                       >
                         <CheckCircle2 className="w-4 h-4" />
                       </button>

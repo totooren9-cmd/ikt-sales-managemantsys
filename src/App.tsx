@@ -80,7 +80,7 @@ interface QuotationSim {
   total_value: number;
   tax_rate: number;
   grand_total: number;
-  status: 'Draft' | 'Sent' | 'Approved' | 'Rejected' | 'Cancelled';
+  status: 'Draft' | 'Sent' | 'Approved' | 'Rejected' | 'Cancelled' | 'Invoiced';
   items?: { name: string; qty: number; unit: string; price: number }[];
 }
 
@@ -1365,6 +1365,117 @@ export default function App() {
                                       </button>
                                     )}
 
+                                    {/* Action Convert to Sales Order */}
+                                    {(q.status === 'Approved' || q.status === 'Accepted') && (
+                                      <button 
+                                        onClick={async () => {
+                                          if (!true) {
+                                            return;
+                                          }
+                                          
+                                          // 1. Map items with rich fields for maximum compatibility
+                                          const mappedItems = (q.items || []).map((it: any, idx: number) => {
+                                            const qty = Number(it.qty || 1);
+                                            const duration = Number(it.duration || 1);
+                                            const unitRate = Number(it.price || it.unit_rate || it.unit_price || 0);
+                                            const totalPrice = Number(it.total_price || (qty * duration * unitRate));
+                                            return {
+                                              item_no: idx + 1,
+                                              description: it.name || it.description || '',
+                                              qty: qty,
+                                              remaining_qty: qty,
+                                              duration: duration,
+                                              unit: it.unit || 'Job',
+                                              unit_rate: unitRate,
+                                              unit_price: unitRate,
+                                              total_price: totalPrice
+                                            };
+                                          });
+
+                                          // 2. Find customer_id dynamically
+                                          let targetCustomerId = 'c2ef4942-83b3-4f9e-bbb4-7a0df47a0002'; // fallback
+                                          try {
+                                            const localCusts = JSON.parse(localStorage.getItem('crm_customers') || '[]');
+                                            const matched = localCusts.find((c: any) => 
+                                              c.customer_name?.includes(q.customer_name) || 
+                                              q.customer_name?.includes(c.customer_name)
+                                            );
+                                            if (matched) {
+                                              targetCustomerId = matched.id;
+                                            }
+                                          } catch (e) {
+                                            console.error(e);
+                                          }
+
+                                          const soPayload = {
+                                            quotation_id: String(q.id),
+                                            customer_id: targetCustomerId,
+                                            project_name: q.title || q.project_name || 'โครงการจากใบเสนอราคา ' + q.quotation_no,
+                                            total_amount: q.grand_total,
+                                            status: 'Pending' as const,
+                                            order_date: new Date().toISOString().slice(0, 10),
+                                            items: mappedItems
+                                          };
+
+                                          try {
+                                            // @ts-ignore
+                                            if (window.SupabaseDB) {
+                                              // @ts-ignore
+                                              await window.SupabaseDB.addSalesOrder(soPayload);
+                                              // @ts-ignore
+                                              await window.SupabaseDB.updateQuotation(q.id, { status: 'Invoiced' });
+                                            } else {
+                                              const sos = JSON.parse(localStorage.getItem('crm_sales_orders') || '[]');
+                                              const nextCode = 'SO-' + String(sos.length + 1).padStart(3, '0') + '-' + new Date().getFullYear().toString().slice(-2);
+                                              const prepared = {
+                                                id: crypto.randomUUID(),
+                                                so_no: nextCode,
+                                                quotation_id: String(q.id),
+                                                customer_id: targetCustomerId,
+                                                project_name: soPayload.project_name,
+                                                total_amount: soPayload.total_amount,
+                                                status: 'Pending' as const,
+                                                order_date: soPayload.order_date,
+                                                items: soPayload.items,
+                                                created_at: new Date().toISOString()
+                                              };
+                                              sos.push(prepared);
+                                              localStorage.setItem('crm_sales_orders', JSON.stringify(sos));
+                                            }
+
+                                            // 3. Update state
+                                            setQuotations(prevQuotations => prevQuotations.map(item => item.id === q.id ? { ...item, status: 'Invoiced' } : item));
+                                            
+                                            // 4. Add Log
+                                            const newLog: AuditLogSim = {
+                                              id: auditLogs.length + 1,
+                                              action: 'ออกใบสั่งขายจากใบเสนอราคา (Convert QT to SO)',
+                                              fullname: userFullname,
+                                              role: userRole,
+                                              created_at: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                                              details: `แปลงใบเสนอราคา ${q.quotation_no} เป็น Sales Order สำเร็จ และจบกระบวนการใบเสนอราคา`,
+                                              target_type: 'quotation'
+                                            };
+                                            setAuditLogs(prevLogs => [newLog, ...prevLogs]);
+
+                                            showSimToast(`ส่งใบเสนอราคาไปสร้าง Sales Order เรียบร้อย!`, 'success');
+
+                                            // 5. Redirect
+                                            setTimeout(() => {
+                                              window.location.href = '/sales-orders.html';
+                                            }, 1000);
+                                          } catch (err: any) {
+                                            alert('เกิดข้อผิดพลาด: ' + err.message);
+                                          }
+                                        }}
+                                        title="ส่งไป Sales Orders"
+                                        className="p-1.5 bg-emerald-950 hover:bg-emerald-900 border border-emerald-900 hover:text-white text-emerald-400 rounded-lg transition-all cursor-pointer flex items-center gap-1 text-[10px] font-bold"
+                                      >
+                                        <CheckCircle2 className="w-3.5 h-3.5" />
+                                        <span>ส่งไป Sales Orders</span>
+                                      </button>
+                                    )}
+
                                     {/* Action Delete */}
                                     <button 
                                       onClick={() => {
@@ -1499,7 +1610,7 @@ export default function App() {
                       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
                         <h3 className="text-sm font-black text-white mb-4"><i className="fas fa-chart-pie text-indigo-400 me-1.5"></i> สัดส่วนบริการ (Service Segment Share)</h3>
                         <div className="h-64 flex items-center justify-center">
-                          <ResponsiveContainer width="100%" height="100%" minHeight={1} minWidth={1}>
+                          <ResponsiveContainer width="100%" height={250}>
                             <PieChart>
                               <Pie
                                 data={[
@@ -1529,7 +1640,7 @@ export default function App() {
                       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
                         <h3 className="text-sm font-black text-white mb-4"><i className="fas fa-chart-bar text-emerald-400 me-1.5"></i> สรุปดีลประมูลงานขายรวมแยกขั้นปัจจุบัน (Opportunity Value by Stage)</h3>
                         <div className="h-64">
-                          <ResponsiveContainer width="100%" height="100%" minHeight={1} minWidth={1}>
+                          <ResponsiveContainer width="100%" height={250}>
                             <BarChart
                               data={['Lead', 'Qualified', 'Proposal', 'Negotiation', 'Won', 'Lost'].map(stage => ({
                                 name: stage,
