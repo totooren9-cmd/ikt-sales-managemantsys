@@ -30,6 +30,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 6. Check and display notifications (Quotation nearing expiration & Overdue invoices)
   checkAndShowSystemNotifications();
+
+  // 7. Render dynamic new item badges in sidebar menu
+  updateSystemBadges();
 });
 
 // Sidebar & Navbar Dynamic Builder
@@ -116,10 +119,10 @@ function injectSharedShell() {
     };
 
     const sidebarHtml = `
-      <aside class="app-sidebar bg-dark text-white shadow" data-bs-theme="dark" style="height: 100vh; position: fixed; top: 0; left: 0; width: 250px; display: flex; flex-direction: column;">
+      <aside class="app-sidebar bg-dark text-white shadow animate-fade-in" data-bs-theme="dark" style="height: 100vh; position: fixed; top: 0; left: 0; width: 250px; display: flex; flex-direction: column;">
         <!-- Brand logo -->
         <div class="sidebar-brand p-3 border-bottom d-flex align-items-center gap-2" style="flex-shrink: 0;">
-          <div class="bg-primary rounded-circle d-flex align-items-center justify-content-center text-white" style="width: 32px; height: 32px; font-weight: 900; background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);">
+          <div class="bg-primary rounded-circle d-flex align-items-center justify-content-center text-white" style="width: 32px; height: 32px; font-weight: 900; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);">
             IKM
           </div>
           <span class="brand-text fw-bold tracking-tight text-white" style="font-size: 1.05rem;">IKM ERP CRM</span>
@@ -151,6 +154,7 @@ function injectSharedShell() {
                 <a href="opportunities.html" class="nav-link px-3 py-1.8 d-flex align-items-center gap-2 rounded text-decoration-none text-white-50 hover-bg-light transition-all">
                   <i class="fas fa-handshake text-warning" style="font-size:0.92rem; width: 18px;"></i>
                   <span data-i18n="menu_opportunities" style="font-weight: 500; color: #f3f4f6; font-size: 0.82rem;">${menuTitles.opportunities}</span>
+                  <span id="badge-opps" class="badge bg-info text-dark ms-auto font-sans font-bold d-none new-count-badge" style="font-size: 10px; border-radius: 12px; padding: 2.5px 6.5px;">0</span>
                 </a>
               </li>
 
@@ -159,6 +163,7 @@ function injectSharedShell() {
                 <a href="quotations.html" class="nav-link px-3 py-1.8 d-flex align-items-center gap-2 rounded text-decoration-none text-white-50 hover-bg-light transition-all">
                   <i class="fas fa-file-contract text-warning" style="font-size:0.92rem; width: 18px;"></i>
                   <span data-i18n="menu_quotations" style="font-weight: 500; color: #f3f4f6; font-size: 0.82rem;">${menuTitles.quotations}</span>
+                  <span id="badge-quotes" class="badge bg-warning text-dark ms-auto font-sans font-bold d-none new-count-badge" style="font-size: 10px; border-radius: 12px; padding: 2.5px 6.5px;">0</span>
                 </a>
               </li>
 
@@ -167,6 +172,7 @@ function injectSharedShell() {
                 <a href="sales-orders.html" class="nav-link px-3 py-1.8 d-flex align-items-center gap-2 rounded text-decoration-none text-white-50 hover-bg-light transition-all">
                   <i class="fas fa-list-check text-primary" style="font-size:0.92rem; width: 18px;"></i>
                   <span data-i18n="menu_sales_orders" style="font-weight: 500; color: #f3f4f6; font-size: 0.82rem;">${menuTitles.sales_orders}</span>
+                  <span id="badge-sales" class="badge bg-primary ms-auto font-sans font-bold d-none new-count-badge" style="font-size: 10px; border-radius: 12px; padding: 2.5px 6.5px;">0</span>
                 </a>
               </li>
 
@@ -175,6 +181,7 @@ function injectSharedShell() {
                 <a href="invoices.html" class="nav-link px-3 py-1.8 d-flex align-items-center gap-2 rounded text-decoration-none text-white-50 hover-bg-light transition-all">
                   <i class="fas fa-file-invoice text-indigo" style="font-size:0.92rem; width: 18px;"></i>
                   <span data-i18n="menu_invoices" style="font-weight: 500; color: #f3f4f6; font-size: 0.82rem;">${menuTitles.invoices}</span>
+                  <span id="badge-invoices" class="badge bg-danger ms-auto font-sans font-bold d-none new-count-badge" style="font-size: 10px; border-radius: 12px; padding: 2.5px 6.5px;">0</span>
                 </a>
               </li>
 
@@ -1274,3 +1281,68 @@ window.handleGlobalSignOut = async function(e) {
   // Redirect to login page
   window.location.href = 'login.html';
 };
+
+async function updateSystemBadges() {
+  if (!window.SupabaseDB) {
+    // If SupabaseDB is not ready yet, retry in 500ms
+    setTimeout(updateSystemBadges, 500);
+    return;
+  }
+  try {
+    // 1. Get Quotations count (Draft or Sent status)
+    const quotations = await window.SupabaseDB.getQuotations() || [];
+    const newQuotesCount = quotations.filter(q => q.status === "Draft" || q.status === "Sent").length;
+    const badgeQuotes = document.getElementById('badge-quotes');
+    if (badgeQuotes) {
+      if (newQuotesCount > 0) {
+        badgeQuotes.textContent = newQuotesCount;
+        badgeQuotes.classList.remove('d-none');
+      } else {
+        badgeQuotes.classList.add('d-none');
+      }
+    }
+
+    // 2. Get Sales Orders count (Pending status)
+    const salesOrders = await window.SupabaseDB.getSalesOrders() || [];
+    const pendingSOCount = salesOrders.filter(so => so.status === "Pending").length;
+    const badgeSales = document.getElementById('badge-sales');
+    if (badgeSales) {
+      if (pendingSOCount > 0) {
+        badgeSales.textContent = pendingSOCount;
+        badgeSales.classList.remove('d-none');
+      } else {
+        badgeSales.classList.add('d-none');
+      }
+    }
+
+    // 3. Get Invoices count (Unpaid/Overdue status)
+    const invoices = await window.SupabaseDB.getInvoices() || [];
+    const unpaidInvoicesCount = invoices.filter(inv => inv.status === "Unpaid" || inv.status === "Overdue").length;
+    const badgeInvoices = document.getElementById('badge-invoices');
+    if (badgeInvoices) {
+      if (unpaidInvoicesCount > 0) {
+        badgeInvoices.textContent = unpaidInvoicesCount;
+        badgeInvoices.classList.remove('d-none');
+      } else {
+        badgeInvoices.classList.add('d-none');
+      }
+    }
+
+    // 4. Get Opportunities count (Lead/Qualified status)
+    const opps = await window.SupabaseDB.getOpportunities() || [];
+    const newOppsCount = opps.filter(o => o.stage === "Lead" || o.stage === "Qualified").length;
+    const badgeOpps = document.getElementById('badge-opps');
+    if (badgeOpps) {
+      if (newOppsCount > 0) {
+        badgeOpps.textContent = newOppsCount;
+        badgeOpps.classList.remove('d-none');
+      } else {
+        badgeOpps.classList.add('d-none');
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to fetch badge counts:", err);
+  }
+}
+
+window.updateSystemBadges = updateSystemBadges;

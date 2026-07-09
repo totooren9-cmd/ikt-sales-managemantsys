@@ -209,6 +209,7 @@ export default function QuotationManagement() {
             }}
             quotations={quotations}
             customers={customers}
+            onToast={showToast}
           />
         ) : (
           <div className="space-y-6">
@@ -550,7 +551,7 @@ function QuoteList({
                                 };
                               });
 
-                              const soPayload = {
+                               const soPayload = {
                                 quotation_id: q.id,
                                 customer_id: q.customer_id,
                                 project_name: q.title || q.project_name || "ดีลจากใบเสนอราคา " + q.quotation_no,
@@ -558,6 +559,9 @@ function QuoteList({
                                 status: "Pending",
                                 order_date: new Date().toISOString().slice(0, 10),
                                 sales_person: q.sales_person || q.sales_representative || null,
+                                po_no: q.po_no || null,
+                                delivery_plan: q.delivery_plan || null,
+                                target_delivery_date: q.delivery_plan || null,
                                 items: soItems
                               };
 
@@ -627,7 +631,7 @@ function StatusBadge({ status }: { status: string }) {
 // -----------------------------------------------------
 // FORM COMPONENT
 // -----------------------------------------------------
-function QuoteForm({ id, onClose, quotations, customers }: any) {
+function QuoteForm({ id, onClose, quotations, customers, onToast }: any) {
   const initialQuote =
     id === "new" ? null : quotations.find((q: any) => q.id === id);
   const [items, setItems] = useState<
@@ -787,6 +791,8 @@ function QuoteForm({ id, onClose, quotations, customers }: any) {
       validity_days: parseInt(fd.get("validity") as string) || 30,
       payment_term: fd.get("payment"),
       sales_person: fd.get("sales"),
+      po_no: fd.get("po_no") || "",
+      delivery_plan: fd.get("delivery_plan") || "",
       status: fd.get("status"),
       revision_number: parseInt(fd.get("revision") as string) || 0,
       remarks: fd.get("remarks") || "",
@@ -808,12 +814,92 @@ function QuoteForm({ id, onClose, quotations, customers }: any) {
 
     // @ts-ignore
     if (window.SupabaseDB) {
+      let savedQuote;
       if (initialQuote) {
         // @ts-ignore
-        await window.SupabaseDB.updateQuotation(initialQuote.id, payload);
+        savedQuote = await window.SupabaseDB.updateQuotation(initialQuote.id, payload);
       } else {
         // @ts-ignore
-        await window.SupabaseDB.addQuotation(payload);
+        savedQuote = await window.SupabaseDB.addQuotation(payload);
+      }
+
+      // Automatically create a Sales Order when quotation is Approved
+      if (payload.status === "Approved" && savedQuote) {
+        try {
+          // Double check if Sales Order already exists for this quotation to prevent duplicates
+          // @ts-ignore
+          const existingOrders = await window.SupabaseDB.getSalesOrders() || [];
+          const alreadyExists = existingOrders.some((so: any) => so.quotation_id === savedQuote.id);
+
+          if (!alreadyExists) {
+            // Map items
+            const soItems = (savedQuote.items || []).map((it: any, idx: number) => {
+              const qty = Number(it.qty || 1);
+              const duration = Number(it.duration || it.duration_days || 1);
+              const unitRate = Number(it.unit_rate || it.rate || it.unit_price || 0);
+              const totalPrice = Number(it.total_price || (qty * duration * unitRate));
+              return {
+                item_no: it.item_no || idx + 1,
+                description: it.description || it.desc || "",
+                qty: qty,
+                remaining_qty: qty,
+                duration: duration,
+                unit: it.unit || "Set",
+                unit_rate: unitRate,
+                unit_price: unitRate,
+                total_price: totalPrice
+              };
+            });
+
+            const soPayload = {
+              quotation_id: savedQuote.id,
+              customer_id: savedQuote.customer_id,
+              project_name: savedQuote.title || "ดีลจากใบเสนอราคา " + savedQuote.quotation_no,
+              total_amount: savedQuote.grand_total || savedQuote.total_value || 0,
+              status: "Pending",
+              order_date: new Date().toISOString().slice(0, 10),
+              sales_person: savedQuote.sales_person || null,
+              po_no: savedQuote.po_no || null,
+              delivery_plan: savedQuote.delivery_plan || null,
+              target_delivery_date: savedQuote.delivery_plan || null,
+              items: soItems
+            };
+
+            // @ts-ignore
+            const createdSo = await window.SupabaseDB.addSalesOrder(soPayload);
+
+            // Update Quotation status to 'Invoiced' (จบกระบวนการใบเสนอราคา)
+            // @ts-ignore
+            await window.SupabaseDB.updateQuotation(savedQuote.id, { status: 'Invoiced' });
+
+            // Toast/Alert to signify the auto conversion
+            // @ts-ignore
+            if (window.Swal) {
+              // @ts-ignore
+              window.Swal.fire({
+                title: "Approved & Converted!",
+                text: `Quotation Approved successfully. Sales Order ${createdSo.so_no || ""} has been automatically generated in the database!`,
+                icon: "success",
+                timer: 4000,
+                showConfirmButton: true
+              });
+            } else if (onToast) {
+              onToast(`Approved! Sales Order ${createdSo.so_no || ""} created automatically.`, 'success');
+            }
+          }
+        } catch (err: any) {
+          console.error("Auto sales order conversion failed:", err);
+          if (onToast) {
+            onToast("เกิดข้อผิดพลาดในการสร้าง Sales Order อัตโนมัติ: " + err.message, 'err');
+          }
+        }
+      }
+
+      // Update real-time menu badges
+      // @ts-ignore
+      if (window.updateSystemBadges) {
+        // @ts-ignore
+        window.updateSystemBadges();
       }
     }
     onClose();
@@ -1006,6 +1092,29 @@ function QuoteForm({ id, onClose, quotations, customers }: any) {
                 "Admin"
               }
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-teal-700 mb-1.5">
+              Customer PO Ref
+            </label>
+            <input
+              type="text"
+              name="po_no"
+              defaultValue={initialQuote?.po_no || ""}
+              placeholder="e.g. PO-PTT-8890"
+              className="w-full px-3 py-2 border border-teal-200 rounded-lg text-sm bg-teal-50/20 text-teal-900 font-medium"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-teal-700 mb-1.5">
+              Delivery Plan
+            </label>
+            <input
+              type="date"
+              name="delivery_plan"
+              defaultValue={initialQuote?.delivery_plan || ""}
+              className="w-full px-3 py-2 border border-teal-200 rounded-lg text-sm bg-teal-50/20 text-teal-900 font-medium"
             />
           </div>
           <div>
